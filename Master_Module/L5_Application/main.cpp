@@ -23,8 +23,149 @@
  * 			@see L0_LowLevel/lpc_sys.h if you wish to override printf/scanf functions.
  *
  */
+#include <stdio.h>
 #include "tasks.hpp"
 #include "examples/examples.hpp"
+#include "Adafruit_RA8875-master/Adafruit_RA8875.h"
+#include "eint.h"
+#include "soft_timer.hpp"
+#include "printf_lib.h"
+#include "utilities.h"
+
+
+
+SoftTimer debounceTimer;
+SemaphoreHandle_t gButtonPressSemaphore = NULL;
+
+
+void callback_func(void)
+{
+	long yield = 0;
+    if (debounceTimer.expired())
+    {
+    	xSemaphoreGiveFromISR(gButtonPressSemaphore, &yield);
+    	portYIELD_FROM_ISR(yield);
+    	debounceTimer.reset(50);
+
+    }
+}
+
+
+class switch_press_task : public scheduler_task
+{
+    public:
+        switch_press_task(uint8_t priority) : scheduler_task("task", 2001, priority)
+        {
+            /* Nothing to init */
+        }
+
+        bool init(void) //Optional
+        {
+        	eint3_enable_port2(5, eint_rising_edge, callback_func);
+        	debounceTimer.reset(50);
+            return true;
+        }
+
+        bool run(void *p) //It is required
+        {
+        	while(1)
+        	{
+        		if(xSemaphoreTake(gButtonPressSemaphore, portMAX_DELAY))
+        		{
+        			u0_dbg_printf("Callback for P2.4 invoked\n");
+        		}
+        	}
+            return true;
+        }
+};
+
+
+class LCD_task : public scheduler_task
+{
+    public:
+        LCD_task(uint8_t priority) : scheduler_task("task", 2000, priority)
+        {
+            /* Nothing to init */
+        }
+
+        bool init(void)
+        {
+        	return true;
+        }
+
+        void draw_shape()
+        {
+			Adafruit_RA8875 tft(3,4);
+			if(!tft.begin(RA8875_800x480))
+			{
+				printf("RA8875 Not Found!\n");
+				while(1);
+			}
+
+			tft.displayOn(true);
+			tft.GPIOX(true);      // Enable TFT - display enable tied to GPIOX
+			tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
+			tft.PWM1out(255);
+
+			// With hardware accelleration this is instant
+			tft.fillScreen(RA8875_WHITE);
+
+			// Play with PWM
+			for (uint8_t i=255; i!=0; i-=5 )
+			{
+				tft.PWM1out(i);
+				delay_ms(10);
+			}
+			for (uint8_t i=0; i!=255; i+=5 )
+			{
+				tft.PWM1out(i);
+				delay_ms(10);
+			}
+			tft.PWM1out(255);
+
+			tft.fillScreen(RA8875_RED);
+			delay_ms(500);
+			tft.fillScreen(RA8875_YELLOW);
+			delay_ms(500);
+			tft.fillScreen(RA8875_GREEN);
+			delay_ms(500);
+			tft.fillScreen(RA8875_CYAN);
+			delay_ms(500);
+			tft.fillScreen(RA8875_MAGENTA);
+			delay_ms(500);
+			tft.fillScreen(RA8875_BLACK);
+
+			// Try some GFX acceleration!
+			tft.drawCircle(100, 100, 50, RA8875_BLACK);
+			tft.fillCircle(100, 100, 49, RA8875_GREEN);
+
+			tft.fillRect(11, 11, 398, 198, RA8875_BLUE);
+			tft.drawRect(10, 10, 400, 200, RA8875_GREEN);
+			tft.fillRoundRect(200, 10, 200, 100, 10, RA8875_RED);
+			tft.drawPixel(10,10,RA8875_BLACK);
+			tft.drawPixel(11,11,RA8875_BLACK);
+			tft.drawLine(10, 10, 200, 100, RA8875_RED);
+			tft.drawTriangle(200, 15, 250, 100, 150, 125, RA8875_BLACK);
+			tft.fillTriangle(200, 16, 249, 99, 151, 124, RA8875_YELLOW);
+			tft.drawEllipse(300, 100, 100, 40, RA8875_BLACK);
+			tft.fillEllipse(300, 100, 98, 38, RA8875_GREEN);
+			// Argument 5 (curvePart) is a 2-bit value to control each corner (select 0, 1, 2, or 3)
+			tft.drawCurve(50, 100, 80, 40, 2, RA8875_BLACK);
+			tft.fillCurve(50, 100, 78, 38, 2, RA8875_WHITE);
+
+        }
+
+        bool run(void *p) //It is required
+        {
+			draw_shape();
+
+
+			while(1);
+			return true;
+        }
+};
+
+
 
 /**
  * The main() creates tasks or "threads".  See the documentation of scheduler_task class at scheduler_task.hpp
@@ -52,10 +193,15 @@ int main(void)
      * such that it can save remote control codes to non-volatile memory.  IR remote
      * control codes can be learned by typing the "learn" terminal command.
      */
-    scheduler_add_task(new terminalTask(PRIORITY_HIGH));
+	scheduler_add_task(new terminalTask(PRIORITY_HIGH));
+
+	gButtonPressSemaphore = xSemaphoreCreateBinary();
+    scheduler_add_task(new LCD_task(PRIORITY_HIGH));
+    scheduler_add_task(new switch_press_task(PRIORITY_HIGH));
+
 
     /* Consumes very little CPU, but need highest priority to handle mesh network ACKs */
-    scheduler_add_task(new wirelessTask(PRIORITY_CRITICAL));
+    //scheduler_add_task(new wirelessTask(PRIORITY_CRITICAL));
 
     /* Change "#if 0" to "#if 1" to run period tasks; @see period_callbacks.cpp */
     #if 0

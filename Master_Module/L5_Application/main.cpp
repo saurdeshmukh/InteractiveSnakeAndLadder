@@ -23,6 +23,9 @@
  * 			@see L0_LowLevel/lpc_sys.h if you wish to override printf/scanf functions.
  *
  */
+
+#define BUFFPIXEL 20
+
 #include <stdio.h>
 #include "tasks.hpp"
 #include "examples/examples.hpp"
@@ -31,7 +34,8 @@
 #include "soft_timer.hpp"
 #include "printf_lib.h"
 #include "utilities.h"
-
+#include "ff.h"
+#include "storage.hpp"
 
 
 SoftTimer debounceTimer;
@@ -83,7 +87,7 @@ class switch_press_task : public scheduler_task
 class LCD_task : public scheduler_task
 {
     public:
-        LCD_task(uint8_t priority) : scheduler_task("task", 2000, priority)
+        LCD_task(uint8_t priority) : scheduler_task("task", 8000, priority)
         {
             /* Nothing to init */
         }
@@ -155,9 +159,201 @@ class LCD_task : public scheduler_task
 
         }
 
+        uint16_t color565(uint8_t r, uint8_t g, uint8_t b)
+        {
+        	return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        }
+
+        void bmpDraw(Adafruit_RA8875 tft, char *filename, int x, int y)
+        {
+        	uint32_t  	bmpWidth, bmpHeight;   // W+H in pixels
+        	uint16_t  	bmpDepth;              // Bit depth (currently must be 24)
+        	uint32_t 	bmpImageoffset;        // Start of image data in file
+        	uint32_t 	rowSize;               // Not always = bmpWidth; may have padding
+        	uint8_t  	sdbuffer[3*BUFFPIXEL]; // pixel in buffer (R+G+B per pixel)
+        	uint16_t 	lcdbuffer[BUFFPIXEL];  // pixel out buffer (16-bit per pixel)
+        	uint8_t  	buffidx = sizeof(sdbuffer); // Current position in sdbuffer
+        	bool  		goodBmp = false;       // Set to true on valid header parse
+        	bool  		flip    = true;        // BMP is stored bottom-to-top
+        	int      	w, h, row, col;
+        	uint8_t  	r, g, b;
+        	uint32_t 	pos = 0;
+        	uint8_t  	lcdidx = 0;
+        	bool  		first 	= true;
+
+        	if((x >= tft.width()) || (y >= tft.height())) return;
+
+        	//u0_dbg_printf("Loading image - %s\n", filename);
+        	FIL fatfs_file = { 0 };
+        	FRESULT status;
+        	// Open Existing file
+        	if (FR_OK != (status = f_open(&fatfs_file, filename, FA_OPEN_EXISTING | FA_READ))) {
+        		u0_dbg_printf("##############File not found\n");
+        		return;
+        	}
+
+
+
+        	uint16_t data = 0;
+        	uint32_t offset = 0;
+//          u0_dbg_printf("............%d\n", Storage::read(filename,  &data, sizeof(data), offset));
+//          u0_dbg_printf("...............%d\n", data);
+
+        	// Parse BMP header
+        	Storage::read(filename,  &data, sizeof(data), offset);
+        	offset += sizeof(data);
+        	if(data == 0x4D42)
+        	{
+        		// BMP signature
+        		uint32_t data1 = 0;
+        		Storage::read(filename,  &data1, sizeof(data1), offset);
+        		offset += sizeof(data1);
+        		Storage::read(filename,  &data1, sizeof(data1), offset);
+        		offset += sizeof(data1);
+        		Storage::read(filename,  &bmpImageoffset, sizeof(bmpImageoffset), offset);
+        		offset += sizeof(bmpImageoffset);
+        		//u0_dbg_printf("Image Offset: %d\n",bmpImageoffset);
+
+        		// Read DIB header
+        		uint32_t biSize = 0;
+        		Storage::read(filename,  &biSize, sizeof(biSize), offset);
+        		offset += sizeof(biSize);
+        		Storage::read(filename,  &bmpWidth, sizeof(bmpWidth), offset);
+        		offset += sizeof(bmpWidth);
+        		Storage::read(filename,  &bmpHeight, sizeof(bmpHeight), offset);
+        		offset += sizeof(bmpHeight);
+        		//u0_dbg_printf("%d x %d\n", bmpWidth, bmpHeight);
+
+        		uint16_t biPlanes = 0;
+        		Storage::read(filename,  &biPlanes, sizeof(biPlanes), offset);
+        		offset += sizeof(biPlanes);
+
+        		if(biPlanes == 1)
+        		{
+        			// # planes -- must be '1'
+        			Storage::read(filename,  &bmpDepth, sizeof(bmpDepth), offset);  // bits per pixel
+        			offset += sizeof(bmpDepth);
+
+        			uint32_t biCompression = 0;
+        			Storage::read(filename,  &biCompression, sizeof(biCompression), offset);
+        			offset += sizeof(biCompression);
+        			if((bmpDepth == 24) && (biCompression == 0))
+        			{
+        				// 0 = uncompressed
+        				goodBmp = true; // Supported BMP format -- proceed!
+
+        				// BMP rows are padded (if needed) to 4-byte boundary
+        				rowSize = (bmpWidth * 3 + 3) & ~3;
+
+        				// If bmpHeight is negative, image is in top-down order.
+        				// This is not canon but has been observed in the wild.
+        				if(bmpHeight < 0)
+        				{
+        					bmpHeight = -bmpHeight;
+        					flip      = false;
+        				}
+
+        				// Crop area to be loaded
+        				w = bmpWidth;
+        				h = bmpHeight;
+        				if((x+w-1) >= tft.width())  w = tft.width()  - x;
+        				if((y+h-1) >= tft.height()) h = tft.height() - y;
+
+        				// Set TFT address window to clipped image bounds
+
+        				for (row=0; row<h; row++)
+        				{
+        					// For each scanline...
+        					// Seek to start of scan line.  It might seem labor-
+        					// intensive to be doing this on every line, but this
+        					// method covers a lot of gritty details like cropping
+        					// and scanline padding.  Also, the seek only takes
+        					// place if the file position actually needs to change
+        					// (avoids a lot of cluster math in SD library).
+        					if(flip) // Bitmap is stored bottom-to-top order (normal BMP)
+        						pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+        					else     // Bitmap is stored top-to-bottom
+        						pos = bmpImageoffset + row * rowSize;
+        					if(offset != pos)
+        					{
+        						// Need seek?
+        						offset = pos;
+        						buffidx = sizeof(sdbuffer); // Force buffer reload
+        					}
+
+        					for (col=0; col<w; col++)
+        					{
+        						// For each column...
+        						// Time to read more pixel data?
+        						if (buffidx >= sizeof(sdbuffer))
+        						{
+        							// Indeed
+        							// Push LCD buffer to the display first
+        							if(lcdidx > 0)
+        							{
+        								tft.drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+        								lcdidx = 0;
+        								first  = false;
+        							}
+        							Storage::read(filename,  sdbuffer, sizeof(sdbuffer), offset);
+        							offset += sizeof(sdbuffer);
+        							buffidx = 0; // Set index to beginning
+        						}
+        						// Convert pixel from BMP to TFT format
+        						b = sdbuffer[buffidx++];
+        						g = sdbuffer[buffidx++];
+        						r = sdbuffer[buffidx++];
+        						lcdbuffer[lcdidx] = color565(r,g,b);
+        						tft.drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+        					} // end pixel
+
+        				} // end scanline
+
+        				// Write any remaining data to LCD
+        				if(lcdidx > 0)
+        				{
+        					tft.drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+        				}
+
+        			} // end goodBmp
+        		}
+        	}
+
+        	if(!goodBmp)
+        		u0_dbg_printf("BMP format not recognized.\n");
+
+        }
+
+
+
+        void display_image()
+        {
+			Adafruit_RA8875 tft(3,4);
+      	  /* Initialise the display using 'RA8875_480x272' or 'RA8875_800x480' */
+			if(!tft.begin(RA8875_800x480))
+			{
+				printf("RA8875 Not Found!\n");
+				while(1);
+			}
+
+        	  tft.displayOn(true);
+        	  tft.GPIOX(true);      // Enable TFT - display enable tied to GPIOX
+        	  tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
+        	  tft.PWM1out(255);
+
+        	  //u0_dbg_printf("(");
+        	  //u0_dbg_printf("%d, ",tft.width());
+        	  //u0_dbg_printf("%d \n",tft.height());
+        	  tft.graphicsMode();                 // go back to graphics mode
+        	  tft.fillScreen(RA8875_BLACK);
+        	  tft.graphicsMode();
+        	  bmpDraw(tft, "1:board.bmp", 0, 0);
+        }
+
         bool run(void *p) //It is required
         {
-			draw_shape();
+			//draw_shape();
+        	display_image();
 
 
 			while(1);

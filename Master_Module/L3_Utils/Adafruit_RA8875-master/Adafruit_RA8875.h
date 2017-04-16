@@ -40,6 +40,8 @@
 #endif
 
 #include <Adafruit-GFX-Library-master/Adafruit_GFX.h>
+#include "ff.h"
+#include "printf_lib.h"
 
 #ifndef _ADAFRUIT_RA8875_H
 #define _ADAFRUIT_RA8875_H
@@ -47,8 +49,12 @@
 // Sizes!
 enum RA8875sizes { RA8875_480x272, RA8875_800x480 };
 
+
+#define BUFFPIXEL 85
+
+
 // Touch screen cal structs
-typedef struct Point 
+typedef struct Point
 {
   int32_t x;
   int32_t y;
@@ -141,6 +147,10 @@ class Adafruit_RA8875 : public Adafruit_GFX {
     return size;
   }
 
+  /* Helper API's added for Snake and Ladder project*/
+  bool init_display(RA8875sizes size, uint32_t pwm_clk);
+  void bmpDraw(char *filename, int x, int y);
+
  private:
   void PLLinit(void);
   void initialize(void);
@@ -152,6 +162,8 @@ class Adafruit_RA8875 : public Adafruit_GFX {
   void ellipseHelper(int16_t xCenter, int16_t yCenter, int16_t longAxis, int16_t shortAxis, uint16_t color, bool filled);
   void curveHelper(int16_t xCenter, int16_t yCenter, int16_t longAxis, int16_t shortAxis, uint8_t curvePart, uint16_t color, bool filled);
 
+  /* Helper API's added for Snake and Ladder project*/
+  uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
   uint8_t _cs, _rst;
   uint16_t _width, _height;
   uint8_t _textScale;

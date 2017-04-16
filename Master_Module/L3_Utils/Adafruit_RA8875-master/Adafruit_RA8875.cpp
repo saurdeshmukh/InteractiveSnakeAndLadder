@@ -1339,3 +1339,195 @@ uint8_t  Adafruit_RA8875::readStatus(void)
   digitalWrite(HIGH);
   return x;
 }
+
+
+/* Helper API's added for Snake and Ladder project*/
+bool Adafruit_RA8875::init_display(RA8875sizes size, uint32_t pwm_clk)
+{
+	if(!begin(size))
+	{
+		printf("RA8875 Not Found!\n");
+		return false;
+	}
+
+	displayOn(true);
+	GPIOX(true);      // Enable TFT - display enable tied to GPIOX
+	PWM1config(true, pwm_clk); // PWM output for backlight
+	PWM1out(255);
+	return true;
+}
+
+
+static  FRESULT read_wrapper(FIL file, void* pData, unsigned int bytesToRead, unsigned int offset)
+{
+    FRESULT status = FR_INT_ERR;
+    unsigned int bytesRead = 0;
+
+	if(offset) {
+		f_lseek(&file, offset);
+	}
+	status = f_read(&file, pData, bytesToRead, &bytesRead);
+    return status;
+}
+
+void Adafruit_RA8875::bmpDraw(char *filename, int x, int y)
+{
+	uint32_t  	bmpWidth, bmpHeight;   // W+H in pixels
+	uint16_t  	bmpDepth;              // Bit depth (currently must be 24)
+	uint32_t 	bmpImageoffset;        // Start of image data in file
+	uint32_t 	rowSize;               // Not always = bmpWidth; may have padding
+	uint8_t  	sdbuffer[3*BUFFPIXEL]; // pixel in buffer (R+G+B per pixel)
+	uint16_t 	lcdbuffer[BUFFPIXEL];  // pixel out buffer (16-bit per pixel)
+	uint8_t  	buffidx = sizeof(sdbuffer); // Current position in sdbuffer
+	bool  		goodBmp = false;       // Set to true on valid header parse
+	bool  		flip    = true;        // BMP is stored bottom-to-top
+	int      	w, h, row, col;
+	uint8_t  	r, g, b;
+	uint32_t 	pos = 0;
+	uint8_t  	lcdidx = 0;
+	bool  		first 	= true;
+
+	if((x >= width()) || (y >= height())) return;
+
+	//u0_dbg_printf("Loading image - %s\n", filename);
+	FIL file = { 0 };
+	FRESULT status;
+	// Open Existing file
+	if (FR_OK != (status = f_open(&file, filename, FA_OPEN_EXISTING | FA_READ))) {
+		u0_dbg_printf("##############File not found\n");
+		return;
+	}
+
+	uint16_t data = 0;
+	uint32_t offset = 0;
+	// Parse BMP header
+	read_wrapper(file,  &data, sizeof(data), offset);
+	offset += sizeof(data);
+	if(data == 0x4D42)
+	{
+		// BMP signature
+		uint32_t data1 = 0;
+		read_wrapper(file,  &data1, sizeof(data1), offset);
+		offset += sizeof(data1);
+		read_wrapper(file,  &data1, sizeof(data1), offset);
+		offset += sizeof(data1);
+		read_wrapper(file,  &bmpImageoffset, sizeof(bmpImageoffset), offset);
+		offset += sizeof(bmpImageoffset);
+		//u0_dbg_printf("Image Offset: %d\n",bmpImageoffset);
+
+		// Read DIB header
+		uint32_t biSize = 0;
+		read_wrapper(file,  &biSize, sizeof(biSize), offset);
+		offset += sizeof(biSize);
+		read_wrapper(file,  &bmpWidth, sizeof(bmpWidth), offset);
+		offset += sizeof(bmpWidth);
+		read_wrapper(file,  &bmpHeight, sizeof(bmpHeight), offset);
+		offset += sizeof(bmpHeight);
+		//u0_dbg_printf("%d x %d\n", bmpWidth, bmpHeight);
+
+		uint16_t biPlanes = 0;
+		read_wrapper(file,  &biPlanes, sizeof(biPlanes), offset);
+		offset += sizeof(biPlanes);
+
+		if(biPlanes == 1)
+		{
+			// # planes -- must be '1'
+			read_wrapper(file,  &bmpDepth, sizeof(bmpDepth), offset);  // bits per pixel
+			offset += sizeof(bmpDepth);
+
+			uint32_t biCompression = 0;
+			read_wrapper(file,  &biCompression, sizeof(biCompression), offset);
+			offset += sizeof(biCompression);
+			if((bmpDepth == 24) && (biCompression == 0))
+			{
+				// 0 = uncompressed
+				goodBmp = true; // Supported BMP format -- proceed!
+
+				// BMP rows are padded (if needed) to 4-byte boundary
+				rowSize = (bmpWidth * 3 + 3) & ~3;
+
+				// If bmpHeight is negative, image is in top-down order.
+				// This is not canon but has been observed in the wild.
+				if(bmpHeight < 0)
+				{
+					bmpHeight = -bmpHeight;
+					flip      = false;
+				}
+
+				// Crop area to be loaded
+				w = bmpWidth;
+				h = bmpHeight;
+				if((x+w-1) >= width())  w = width()  - x;
+				if((y+h-1) >= height()) h = height() - y;
+
+				// Set TFT address window to clipped image bounds
+
+				for (row=0; row<h; row++)
+				{
+					// For each scanline...
+					// Seek to start of scan line.  It might seem labor-
+					// intensive to be doing this on every line, but this
+					// method covers a lot of gritty details like cropping
+					// and scanline padding.  Also, the seek only takes
+					// place if the file position actually needs to change
+					// (avoids a lot of cluster math in SD library).
+					if(flip) // Bitmap is stored bottom-to-top order (normal BMP)
+						pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+					else     // Bitmap is stored top-to-bottom
+						pos = bmpImageoffset + row * rowSize;
+					if(offset != pos)
+					{
+						// Need seek?
+						offset = pos;
+						buffidx = sizeof(sdbuffer); // Force buffer reload
+					}
+
+					for (col=0; col<w; col++)
+					{
+						// For each column...
+						// Time to read more pixel data?
+						if (buffidx >= sizeof(sdbuffer))
+						{
+							// Indeed
+							// Push LCD buffer to the display first
+							if(lcdidx > 0)
+							{
+								drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+								lcdidx = 0;
+								first  = false;
+							}
+							read_wrapper(file,  sdbuffer, sizeof(sdbuffer), offset);
+							offset += sizeof(sdbuffer);
+							buffidx = 0; // Set index to beginning
+						}
+						// Convert pixel from BMP to TFT format
+						b = sdbuffer[buffidx++];
+						g = sdbuffer[buffidx++];
+						r = sdbuffer[buffidx++];
+						lcdbuffer[lcdidx] = color565(r,g,b);
+						drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+					} // end pixel
+
+				} // end scanline
+
+				// Write any remaining data to LCD
+				if(lcdidx > 0)
+				{
+					drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+				}
+
+			} // end goodBmp
+		}
+	}
+
+	if(!goodBmp)
+		u0_dbg_printf("BMP format not recognized.\n");
+
+	f_close(&file);
+}
+
+uint16_t Adafruit_RA8875::color565(uint8_t r, uint8_t g, uint8_t b)
+{
+	return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+

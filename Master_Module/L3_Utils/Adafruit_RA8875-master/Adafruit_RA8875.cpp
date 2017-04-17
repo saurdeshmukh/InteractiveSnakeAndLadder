@@ -211,7 +211,8 @@ void Adafruit_RA8875::PLLinit(void) {
 /**************************************************************************/
 void Adafruit_RA8875::initialize(void) {
   PLLinit();
-  writeReg(RA8875_SYSR, RA8875_SYSR_16BPP | RA8875_SYSR_MCU8);
+  //writeReg(RA8875_SYSR, RA8875_SYSR_16BPP | RA8875_SYSR_MCU8);
+  writeReg(RA8875_SYSR, RA8875_SYSR_8BPP | RA8875_SYSR_MCU8);
 
   /* Timing values */
   uint8_t pixclk;
@@ -222,6 +223,16 @@ void Adafruit_RA8875::initialize(void) {
   uint8_t vsync_pw; 
   uint16_t vsync_nondisp;
   uint16_t vsync_start;
+
+	_DPCR_Reg = 0b00000000;
+	_maxLayers = 2;
+	_currentLayer = 0;
+	_useMultiLayers = false;//starts with one layer only
+	_hasLayerLimits = false;
+	_color_bpp = 16;
+	_colorIndex = 0;
+
+
 
   /* Set the correct values for the display being used */  
   if (_size == RA8875_480x272) 
@@ -245,11 +256,14 @@ void Adafruit_RA8875::initialize(void) {
     vsync_nondisp   = 32;
     vsync_start     = 23;
     vsync_pw        = 2;
+	_hasLayerLimits = true;
   }
 
   writeReg(RA8875_PCSR, pixclk);
   delay_ms(1);
   
+
+
   /* Horizontal settings registers */
   writeReg(RA8875_HDWR, (_width / 8) - 1);                          // H width: (HDWR + 1) * 8 = 480
   writeReg(RA8875_HNDFTR, RA8875_HNDFTR_DE_HIGH + hsync_finetune);
@@ -549,7 +563,7 @@ void Adafruit_RA8875::drawPixel (int16_t x, int16_t y, uint16_t color)
   writeReg(RA8875_CURH0, x);
   writeReg(RA8875_CURH1, x >> 8);
   writeReg(RA8875_CURV0, y);
-  writeReg(RA8875_CURV1, y >> 8);  
+  writeReg(RA8875_CURV1, y >> 8);
   writeCommand(RA8875_MRWC);
   digitalWrite(LOW);
 
@@ -562,6 +576,23 @@ void Adafruit_RA8875::drawPixel (int16_t x, int16_t y, uint16_t color)
 
   digitalWrite(HIGH);
 }
+
+void Adafruit_RA8875::drawPixel_8bit (int16_t x, int16_t y, uint8_t color)
+{
+  writeReg(RA8875_CURH0, x);
+  writeReg(RA8875_CURH1, x >> 8);
+  writeReg(RA8875_CURV0, y);
+  writeReg(RA8875_CURV1, y >> 8);
+  writeCommand(RA8875_MRWC);
+  digitalWrite(LOW);
+
+  ssp1_exchange_byte(RA8875_DATAWRITE);
+  ssp1_exchange_byte(color);
+
+  digitalWrite(HIGH);
+}
+
+
 
 /**************************************************************************/
 /*!
@@ -1370,6 +1401,162 @@ static  FRESULT read_wrapper(FIL file, void* pData, unsigned int bytesToRead, un
     return status;
 }
 
+void Adafruit_RA8875::bmpDraw_8bit(char *filename, int x, int y)
+{
+	uint32_t  	bmpWidth, bmpHeight;   // W+H in pixels
+	uint16_t  	bmpDepth;              // Bit depth (currently must be 24)
+	uint32_t 	bmpImageoffset;        // Start of image data in file
+	uint32_t 	rowSize;               // Not always = bmpWidth; may have padding
+	uint8_t  	sdbuffer[BUFFPIXEL]; // pixel in buffer (R+G+B per pixel)
+	uint8_t 	lcdbuffer[BUFFPIXEL];  // pixel out buffer (16-bit per pixel)
+	uint8_t  	buffidx = sizeof(sdbuffer); // Current position in sdbuffer
+	bool  		goodBmp = false;       // Set to true on valid header parse
+	bool  		flip    = true;        // BMP is stored bottom-to-top
+	int      	w, h, row, col;
+	uint8_t  	r, g, b;
+	uint32_t 	pos = 0;
+	uint8_t  	lcdidx = 0;
+	bool  		first 	= true;
+
+	if((x >= width()) || (y >= height())) return;
+
+	//u0_dbg_printf("Loading image - %s\n", filename);
+	FIL file = { 0 };
+	FRESULT status;
+	// Open Existing file
+	if (FR_OK != (status = f_open(&file, filename, FA_OPEN_EXISTING | FA_READ))) {
+		u0_dbg_printf("##############File not found\n");
+		return;
+	}
+
+	uint16_t data = 0;
+	uint32_t offset = 0;
+	// Parse BMP header
+	read_wrapper(file,  &data, sizeof(data), offset);
+	offset += sizeof(data);
+	if(data == 0x4D42)
+	{
+		// BMP signature
+		uint32_t data1 = 0;
+		read_wrapper(file,  &data1, sizeof(data1), offset);
+		offset += sizeof(data1);
+		read_wrapper(file,  &data1, sizeof(data1), offset);
+		offset += sizeof(data1);
+		read_wrapper(file,  &bmpImageoffset, sizeof(bmpImageoffset), offset);
+		offset += sizeof(bmpImageoffset);
+		//u0_dbg_printf("Image Offset: %d\n",bmpImageoffset);
+
+		// Read DIB header
+		uint32_t biSize = 0;
+		read_wrapper(file,  &biSize, sizeof(biSize), offset);
+		offset += sizeof(biSize);
+		read_wrapper(file,  &bmpWidth, sizeof(bmpWidth), offset);
+		offset += sizeof(bmpWidth);
+		read_wrapper(file,  &bmpHeight, sizeof(bmpHeight), offset);
+		offset += sizeof(bmpHeight);
+		//u0_dbg_printf("%d x %d\n", bmpWidth, bmpHeight);
+
+		uint16_t biPlanes = 0;
+		read_wrapper(file,  &biPlanes, sizeof(biPlanes), offset);
+		offset += sizeof(biPlanes);
+
+		if(biPlanes == 1)
+		{
+			// # planes -- must be '1'
+			read_wrapper(file,  &bmpDepth, sizeof(bmpDepth), offset);  // bits per pixel
+			offset += sizeof(bmpDepth);
+
+			uint32_t biCompression = 0;
+			read_wrapper(file,  &biCompression, sizeof(biCompression), offset);
+			offset += sizeof(biCompression);
+			u0_dbg_printf("...............bmpDepth = %d x biCompression  = %d\n", bmpDepth, biCompression);
+			if(biCompression == 0)
+			{
+				// 0 = uncompressed
+				goodBmp = true; // Supported BMP format -- proceed!
+
+				// BMP rows are padded (if needed) to 4-byte boundary
+				//rowSize = (bmpWidth * 3 + 3) & ~3;
+				rowSize = (bmpWidth + 3) & ~3;
+
+				// If bmpHeight is negative, image is in top-down order.
+				// This is not canon but has been observed in the wild.
+				if(bmpHeight < 0)
+				{
+					bmpHeight = -bmpHeight;
+					flip      = false;
+				}
+
+				// Crop area to be loaded
+				w = bmpWidth;
+				h = bmpHeight;
+				if((x+w-1) >= width())  w = width()  - x;
+				if((y+h-1) >= height()) h = height() - y;
+
+				// Set TFT address window to clipped image bounds
+
+				for (row=0; row<h; row++)
+				{
+					// For each scanline...
+					// Seek to start of scan line.  It might seem labor-
+					// intensive to be doing this on every line, but this
+					// method covers a lot of gritty details like cropping
+					// and scanline padding.  Also, the seek only takes
+					// place if the file position actually needs to change
+					// (avoids a lot of cluster math in SD library).
+					if(flip) // Bitmap is stored bottom-to-top order (normal BMP)
+						pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+					else     // Bitmap is stored top-to-bottom
+						pos = bmpImageoffset + row * rowSize;
+					if(offset != pos)
+					{
+						// Need seek?
+						offset = pos;
+						buffidx = sizeof(sdbuffer); // Force buffer reload
+					}
+
+					for (col=0; col<w; col++)
+					{
+						// For each column...
+						// Time to read more pixel data?
+						if (buffidx >= sizeof(sdbuffer))
+						{
+							// Indeed
+							// Push LCD buffer to the display first
+							if(lcdidx > 0)
+							{
+								drawPixel_8bit(col+x, row+y, lcdbuffer[lcdidx]);
+								lcdidx = 0;
+								first  = false;
+							}
+							read_wrapper(file,  sdbuffer, sizeof(sdbuffer), offset);
+							offset += sizeof(sdbuffer);
+							buffidx = 0; // Set index to beginning
+						}
+						// Convert pixel from BMP to TFT format
+						lcdbuffer[lcdidx] = sdbuffer[buffidx++];
+						drawPixel_8bit(col+x, row+y, lcdbuffer[lcdidx]);
+					} // end pixel
+
+				} // end scanline
+
+				// Write any remaining data to LCD
+				if(lcdidx > 0)
+				{
+					drawPixel_8bit(col+x, row+y, lcdbuffer[lcdidx]);
+				}
+
+			} // end goodBmp
+		}
+	}
+
+	if(!goodBmp)
+		u0_dbg_printf("BMP format not recognized.\n");
+
+	f_close(&file);
+}
+
+
 void Adafruit_RA8875::bmpDraw(char *filename, int x, int y)
 {
 	uint32_t  	bmpWidth, bmpHeight;   // W+H in pixels
@@ -1526,8 +1713,229 @@ void Adafruit_RA8875::bmpDraw(char *filename, int x, int y)
 	f_close(&file);
 }
 
+
+
 uint16_t Adafruit_RA8875::color565(uint8_t r, uint8_t g, uint8_t b)
 {
 	return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
+
+/**************************************************************************/
+/*!
+      Set the display 'Color Space'
+	  Parameters:
+	  Bit per Pixel color (colors): 8 or 16 bit
+	  NOTE:
+	  For display over 272*480 give the ability to use
+	  Layers since at 16 bit it's not possible.
+*/
+/**************************************************************************/
+void Adafruit_RA8875::setColorBpp(uint8_t colors)
+{
+	if (colors != _color_bpp){//only if necessary
+		if (colors < 16) {
+			_color_bpp = 8;
+			_colorIndex = 3;
+			writeReg(RA8875_SYSR,0x00);
+			if (_hasLayerLimits) _maxLayers = 2;
+		} else if (colors > 8) {//65K
+			_color_bpp = 16;
+			_colorIndex = 0;
+			writeReg(RA8875_SYSR,0x0C);
+			if (_hasLayerLimits) _maxLayers = 1;
+			_currentLayer = 0;
+		}
+	}
+}
+
+
+
+/**************************************************************************/
+/*!
+		Clear memory (different from fillWindow!)
+	    Parameters:
+		stop: stop clear memory operation
+*/
+/**************************************************************************/
+void Adafruit_RA8875::clearMemory(bool stop)
+{
+	uint8_t temp;
+	temp = readReg(RA8875_MCLR);
+	stop == true ? temp &= ~(1 << 7) : temp |= (1 << 7);
+	writeData(temp);
+}
+
+/**************************************************************************/
+
+
+/**************************************************************************/
+/*!
+		Clear the active window
+	    Parameters:
+		full: false(clear current window), true clear full window
+*/
+/**************************************************************************/
+void Adafruit_RA8875::clearActiveWindow(bool full)
+{
+	uint8_t temp;
+	temp = readReg(RA8875_MCLR);
+	full == true ? temp &= ~(1 << 6) : temp |= (1 << 6);
+	writeData(temp);
+}
+
+
+/*
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++								LAYER STUFF											 +
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+*/
+
+/**************************************************************************/
+/*! This is the most important function to write on:
+	LAYERS
+	CGRAM
+	PATTERN
+	CURSOR
+	Parameter:
+	d (L1, L2, CGRAM, PATTERN, CURSOR)
+	When writing on layers 0 or 1, if the layers are not enable it will enable automatically
+	If the display doesn't support layers, it will automatically switch to 8bit color
+	Remember that when layers are ON you need to disable manually, once that only Layer 1 will be visible
+
+*/
+/**************************************************************************/
+void Adafruit_RA8875::setLayer(enum RA8875writes d)
+{
+	uint8_t temp = readReg(RA8875_MWCR1);
+	switch(d)
+	{
+		case L1:
+			temp &= ~((1<<3) | (1<<2));// Clear bits 3 and 2
+			temp &= ~(1 << 0); //clear bit 0
+			_currentLayer = 0;
+			writeData(temp);
+			if (!_useMultiLayers) useLayers(true);
+		break;
+		case L2:
+			temp &= ~((1<<3) | (1<<2));// Clear bits 3 and 2
+			temp |= (1 << 0); //bit set 0
+			_currentLayer = 1;
+			writeData(temp);
+			if (!_useMultiLayers) useLayers(true);
+		break;
+		case CGRAM:
+		case PATTERN:
+		case CURSOR:
+		default:
+			return;
+	}
+}
+
+
+
+/**************************************************************************/
+/*!
+		Instruct the RA8875 chip to use 2 layers
+		If resolution bring to restrictions it will switch to 8 bit
+		so you can always use layers.
+		Parameters:
+		on: true (enable multiple layers), false (disable)
+
+*/
+/**************************************************************************/
+void Adafruit_RA8875::useLayers(bool on)
+{
+	if (_useMultiLayers == on) return; //no reason to do change that it's already as desidered.
+	if (_hasLayerLimits && _color_bpp > 8)
+	{
+		setColorBpp(8);
+		_maxLayers = 2;
+	}
+	if (on)
+	{
+		_useMultiLayers = true;
+		_DPCR_Reg |= (1 << 7);
+		clearActiveWindow(true);
+	}
+	else
+	{
+		_useMultiLayers = false;
+		_DPCR_Reg &= ~(1 << 7);
+		clearActiveWindow(false);
+	}
+
+	writeReg(RA8875_DPCR,_DPCR_Reg);
+	if (!_useMultiLayers && _color_bpp < 16) setColorBpp(16);
+}
+
+
+
+/**************************************************************************/
+/*!
+
+
+*/
+/**************************************************************************/
+void Adafruit_RA8875::layerEffect(enum RA8875bool efx)
+{
+	uint8_t	reg = 0b00000000;
+	//reg &= ~(0x07);//clear bit 2,1,0
+	if (!_useMultiLayers) useLayers(true);//turn on multiple layers if it's off
+	switch(efx){//                       bit 2,1,0 of LTPR0
+		case LAYER1: //only layer 1 visible  [000]
+			//do nothing
+		break;
+		case LAYER2: //only layer 2 visible  [001]
+			reg |= (1 << 0);
+		break;
+		case TRANSPARENT: //transparent mode [011]
+			reg |= (1 << 0); reg |= (1 << 1);
+		break;
+		case LIGHTEN: //lighten-overlay mode [010]
+			reg |= (1 << 1);
+		break;
+		case OR: //bool OR mode           [100]
+			reg |= (1 << 2);
+		break;
+		case AND: //bool AND mode         [101]
+			reg |= (1 << 0); reg |= (1 << 2);
+		break;
+		case FLOATING: //floating windows    [110]
+			reg |= (1 << 1); reg |= (1 << 2);
+		break;
+		default:
+			//do nothing
+		break;
+	}
+	writeReg(RA8875_LTPR0, reg);
+}
+
+/**************************************************************************/
+/*!
+
+
+*/
+/**************************************************************************/
+void Adafruit_RA8875::layerTransparency(uint8_t layer1, uint8_t layer2)
+{
+	if (layer1 > 8) layer1 = 8;
+	if (layer2 > 8) layer2 = 8;
+	if (!_useMultiLayers) useLayers(true);//turn on multiple layers if it's off
+	//if (_useMultiLayers) _writeRegister(RA8875_LTPR1, ((layer2 & 0x0F) << 4) | (layer1 & 0x0F));
+	//uint8_t res = 0b00000000;//RA8875_LTPR1
+	//reg &= ~(0x07);//clear bit 2,1,0
+	writeReg(RA8875_LTPR1, ((layer2 & 0xF) << 4) | (layer1 & 0xF));
+}
+
+
+/**************************************************************************/
+/*! return the current drawing layer. If layers are OFF, return 255
+
+*/
+/**************************************************************************/
+uint8_t Adafruit_RA8875::getCurrentLayer(void)
+{
+	if (!_useMultiLayers) return 255;
+	return _currentLayer;
+}

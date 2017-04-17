@@ -164,25 +164,30 @@ class LCD_task : public scheduler_task
 			tft.graphicsMode();                 // go back to graphics mode
 			tft.fillScreen(RA8875_BLACK);
 			tft.graphicsMode();
-			tft.bmpDraw("1:board.bmp", 0, 0);
+			tft.setLayer(L1);
+			tft.bmpDraw_8bit("1:board_8bit.bmp", 0, 0);
+			//tft.bmpDraw("1:board.bmp", 0, 0);
 
+			tft.setLayer(L2);
 			for(int i = 0; i < 10; i++)
 			{
 				for(int j = 0; j < 10; j++)
 				{
-					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_BLACK);
+					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_WHITE);
 					tft.fillCircle(68 + (i*74), 437 - (j*44), 19, RA8875_WHITE);
-
+					tft.layerEffect(OR);
+					delay_ms(100);
+					tft.clearMemory();
+					delay_ms(100);
 				}
+				tft.clearMemory();
 			}
-
         }
 
         bool run(void *p) //It is required
         {
 			//draw_shape();
         	display_image();
-
 
 			while(1);
 			return true;

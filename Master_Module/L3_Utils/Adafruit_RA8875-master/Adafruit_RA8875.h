@@ -48,7 +48,8 @@
 
 // Sizes!
 enum RA8875sizes { RA8875_480x272, RA8875_800x480 };
-
+enum RA8875writes { 		L1=0, L2, CGRAM, PATTERN, CURSOR };
+enum RA8875bool { 		LAYER1, LAYER2, TRANSPARENT, LIGHTEN, OR, AND, FLOATING };
 
 #define BUFFPIXEL 85
 
@@ -148,8 +149,18 @@ class Adafruit_RA8875 : public Adafruit_GFX {
   }
 
   /* Helper API's added for Snake and Ladder project*/
-  bool init_display(RA8875sizes size, uint32_t pwm_clk);
-  void bmpDraw(char *filename, int x, int y);
+  bool 		init_display(RA8875sizes size, uint32_t pwm_clk);
+  void 		bmpDraw(char *filename, int x, int y);
+  void 		bmpDraw_8bit(char *filename, int x, int y);
+  void 		drawPixel_8bit (int16_t x, int16_t y, uint8_t color);
+  void 		setColorBpp(uint8_t colors);//set the display color space 8 or 16!
+  void 		clearMemory(bool stop=false);
+  void 		clearActiveWindow(bool full=false);
+  void 		useLayers(bool on);//mainly used to turn of layers!
+  void 		setLayer(enum RA8875writes d);//L1, L2, CGRAM, PATTERN, CURSOR
+  void 		layerEffect(enum RA8875bool efx);//LAYER1, LAYER2, TRANSPARENT, LIGHTEN, OR, AND, FLOATING
+  void 		layerTransparency(uint8_t layer1,uint8_t layer2);
+  uint8_t 	getCurrentLayer(void); //return the current drawing layer. If layers are OFF, return 255
 
  private:
   void PLLinit(void);
@@ -168,7 +179,24 @@ class Adafruit_RA8875 : public Adafruit_GFX {
   uint16_t _width, _height;
   uint8_t _textScale;
   enum RA8875sizes _size;
+
+	uint8_t			_maxLayers;
+	bool			_useMultiLayers;
+	uint8_t			_currentLayer;
+	bool 			_hasLayerLimits;//helper
+	uint8_t			_color_bpp;//8=256, 16=64K colors
+	uint8_t			_colorIndex;
+	uint8_t			 _DPCR_Reg;  ////Display Configuration		  	  [0x20]
+
+
 };
+
+// Abhishek: New Added for layers
+#define RA8875_MWCR1			0x41
+#define RA8875_DPCR				0x20 //Display Configuration Register
+#define RA8875_LTPR0          	0x52 //Layer Transparency Register 0
+#define RA8875_LTPR1           	0x53//Layer Transparency Register 1
+
 
 // Colors (RGB565)
 #define	RA8875_BLACK            0x0000

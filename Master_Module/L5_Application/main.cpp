@@ -38,6 +38,9 @@
 #include<stdlib.h>
 #include<time.h>
 #define CountSnakeLadder 14
+
+bool gameOver=false;
+
 SoftTimer debounceTimer;
 SemaphoreHandle_t gButtonPressSemaphore = NULL;
 Adafruit_RA8875 tft(3,4);
@@ -94,22 +97,22 @@ void makeGame()
 	}
 
 }
-void drawCircle()
+void drawCircle(int drawA,int drawB)
 {
 	int i,j;
 	//clear memory
 	tft.clearMemory();
 	delay_ms(100);
 	//drawing circle
-		i=Game[playerA.Number-1].X;
-	    j=Game[playerA.Number-1].Y;
+		i=Game[drawA].X;
+	    j=Game[drawA].Y;
 	    printf("\nPlayer A X-%d Y-%d",i,j);
 	tft.drawCircle(i,j, 20, RA8875_BLUE);
     tft.fillCircle(i,j, 19, RA8875_BLUE);
     tft.layerEffect(OR);
     delay_ms(100);
-        i=Game[playerB.Number-1].X;
-    	j=Game[playerB.Number-1].Y;
+        i=Game[drawB].X;
+    	j=Game[drawB].Y;
     	printf("\nPlayer B X-%d Y-%d",i,j);
     tft.drawCircle(i,j, 20, RA8875_WHITE);
     tft.fillCircle(i,j, 19, RA8875_WHITE);
@@ -124,13 +127,15 @@ void drawCircle()
 bool getNextLocation(int diceRollOut,int playerId)
 {
 	uint8_t location=0;
-    bool gameOver=false;
-  if(playerId==1)
+	int oldA=0,oldB=0;
+
+  if(playerId==1 && gameOver==false)
   {
 	  location=playerA.Number+diceRollOut;
+	  oldA=playerA.Number-1;
 	  if(location>100)
 		  return false;
-	  else if(location == 100)
+	  else if(location == 100 || playerA.Number ==100)
 	  {
 		   printf("\nPlayer 1 Winnnnnerrr");
 		   playerA.Number=location;
@@ -144,15 +149,21 @@ bool getNextLocation(int diceRollOut,int playerId)
 	  else
 		  playerA.Number=location;
 	  }
+	  for(int m=oldA;m<location;m++)
+	  {
+		  drawCircle(m,(playerB.Number-1));
+		  delay_ms(100);
+	  }
 
   }
 
-  if(playerId==2)
+  if(playerId==2 && gameOver==false)
    {
  	  location=playerB.Number+diceRollOut;
+ 	  oldB=playerB.Number-1;
  	  if(location>100)
  		  return false;
- 	  else if(location==100)
+ 	  else if(location==100 || playerB.Number ==100)
 	  {
 	  printf("\nPlayer 2 Winnnneerrrr");
 	  playerB.Number=location;
@@ -166,15 +177,35 @@ bool getNextLocation(int diceRollOut,int playerId)
 	  else
 		  playerB.Number=location;
  	  }
+ 	 for(int m=oldB;m<location;m++)
+	  {
+		  drawCircle((playerA.Number-1),m);
+		  delay_ms(100);
+	  }
    }
   printf("\n location X - %d location Y - %d",playerA.Number,playerB.Number);
-  drawCircle();
+  if(gameOver)
+  {
+		tft.fillScreen(RA8875_BLACK);
+		tft.textMode();
+	  /* Render some text! */
+	  tft.textColor(RA8875_BLUE,RA8875_WHITE);
+	  tft.textSetCursor(100, 150);
+	  tft.textEnlarge(3);
+	  tft.textWrite("Player 2 Won!!!!");
+	  tft.layerEffect(OR);
+  }
+  else
+  {
+	  drawCircle((playerA.Number-1),(playerB.Number-1));
+  }
   return gameOver;
 }
 
 int rollDice(int playerId)
 {
-	int diceRollout=(rand()%6)+1;
+	uint8_t diceRollout=(rand()%6)+1;
+	LD.setNumber(diceRollout);
 	printf("\n Player Played-%d RolledOut- %d",playerId,diceRollout);
 	return diceRollout;
 	//getNextLocation(diceRollout,playerId);
@@ -304,7 +335,6 @@ class LCD_task : public scheduler_task
 				printf("RA8875 Not Found!\n");
 				while(1);
 			}
-			tft.graphicsMode();                 // go back to graphics mode
 			tft.fillScreen(RA8875_RED);
 			tft.graphicsMode();
 			tft.setLayer(L1);
@@ -357,10 +387,6 @@ class LCD_task : public scheduler_task
 				gameOver=getNextLocation(roll,2);
             }
           }
-//           int i=0;
-//           printf("\n Enter Player:");
-//           scanf("%d",&i);
-//           rollDice(i);
 			return true;
         }
 };
@@ -473,3 +499,4 @@ int main(void)
     scheduler_start(); ///< This shouldn't return
     return -1;
 }
+

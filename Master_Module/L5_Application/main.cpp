@@ -34,12 +34,151 @@
 #include "utilities.h"
 #include "ff.h"
 #include "storage.hpp"
-
-
+#include "io.hpp"
+#include<stdlib.h>
+#include<time.h>
+#define CountSnakeLadder 14
 SoftTimer debounceTimer;
 SemaphoreHandle_t gButtonPressSemaphore = NULL;
+Adafruit_RA8875 tft(3,4);
+time_t t;
+typedef struct
+{
+	int Number;
+	int nextLocation;
+	int X;
+	int Y;
+}Cell;
+Cell Game[100]={0};
+uint8_t button1=0;
+uint8_t button2=0;
+uint8_t SnakeLadderMatrix[CountSnakeLadder][2]={{3,21},{8,30},{17,13},{28,84},{52,29},{57,40},{58,77},{62,22},{75,86},{80,100},{88,18},{90,91},{95,51},{97,79}};
+Cell playerA={0,0,0,0};
+Cell playerB={0,0,0,0};
+void makeGame()
+{
+	uint8_t count=1;
+	for(int j=0;j<10;j++)
+	{
+		if(j%2)
+		{
+          for(int i=9;i>=0;i--)
+          {
+        	  Game[count-1].Number=count;
+        	  Game[count-1].X=68+(i*74);
+        	  Game[count-1].Y=437-(j*44);
+        	  for(int k=0;k<CountSnakeLadder;k++)
+        	  {
+        		  if(SnakeLadderMatrix[k][0]==count)
+        			  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
+        	  }
+        	  count++;
+          }
+
+		}
+		else
+		{
+		  for(int i=0;i<10;i++)
+		  {
+			  Game[count-1].Number=count;
+			  Game[count-1].X=68+(i*74);
+			  Game[count-1].Y=437-(j*44);
+			  for(int k=0;k<CountSnakeLadder;k++)
+			  {
+				  if(SnakeLadderMatrix[k][0]==count)
+					  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
+			  }
+			  count++;
+		  }
+		}
+	}
+
+}
+void drawCircle()
+{
+	int i,j;
+	//clear memory
+	tft.clearMemory();
+	delay_ms(100);
+	//drawing circle
+		i=Game[playerA.Number-1].X;
+	    j=Game[playerA.Number-1].Y;
+	    printf("\nPlayer A X-%d Y-%d",i,j);
+	tft.drawCircle(i,j, 20, RA8875_BLUE);
+    tft.fillCircle(i,j, 19, RA8875_BLUE);
+    tft.layerEffect(OR);
+    delay_ms(100);
+        i=Game[playerB.Number-1].X;
+    	j=Game[playerB.Number-1].Y;
+    	printf("\nPlayer B X-%d Y-%d",i,j);
+    tft.drawCircle(i,j, 20, RA8875_WHITE);
+    tft.fillCircle(i,j, 19, RA8875_WHITE);
+    tft.layerEffect(OR);
+    delay_ms(100);
 
 
+	button1=0;
+	button2=0;
+
+}
+bool getNextLocation(int diceRollOut,int playerId)
+{
+	uint8_t location=0;
+    bool gameOver=false;
+  if(playerId==1)
+  {
+	  location=playerA.Number+diceRollOut;
+	  if(location>100)
+		  return false;
+	  else if(location == 100)
+	  {
+		   printf("\nPlayer 1 Winnnnnerrr");
+		   playerA.Number=location;
+		   button1=10;
+		   gameOver=true;
+	  }
+	  else
+	  {
+	  if(Game[location-1].nextLocation!=0)
+		  playerA.Number=Game[location-1].nextLocation;
+	  else
+		  playerA.Number=location;
+	  }
+
+  }
+
+  if(playerId==2)
+   {
+ 	  location=playerB.Number+diceRollOut;
+ 	  if(location>100)
+ 		  return false;
+ 	  else if(location==100)
+	  {
+	  printf("\nPlayer 2 Winnnneerrrr");
+	  playerB.Number=location;
+	  button2=10;
+	  gameOver=true;
+	  }
+ 	 else
+ 	  {
+	  if(Game[location-1].nextLocation!=0)
+		  playerB.Number=Game[location-1].nextLocation;
+	  else
+		  playerB.Number=location;
+ 	  }
+   }
+  printf("\n location X - %d location Y - %d",playerA.Number,playerB.Number);
+  drawCircle();
+  return gameOver;
+}
+
+int rollDice(int playerId)
+{
+	int diceRollout=(rand()%6)+1;
+	printf("\n Player Played-%d RolledOut- %d",playerId,diceRollout);
+	return diceRollout;
+	//getNextLocation(diceRollout,playerId);
+}
 void callback_func(void)
 {
 	long yield = 0;
@@ -92,12 +231,16 @@ class LCD_task : public scheduler_task
 
         bool init(void)
         {
+        	//draw_shape();
+        	makeGame();
+        	display_image();
+        	srand((unsigned) time(&t));
         	return true;
         }
 
         void draw_shape()
         {
-			Adafruit_RA8875 tft(3,4);
+
 			if(!tft.init_display(RA8875_800x480, RA8875_PWM_CLK_DIV1024))
 			{
 				printf("RA8875 Not Found!\n");
@@ -162,34 +305,62 @@ class LCD_task : public scheduler_task
 				while(1);
 			}
 			tft.graphicsMode();                 // go back to graphics mode
-			tft.fillScreen(RA8875_BLACK);
+			tft.fillScreen(RA8875_RED);
 			tft.graphicsMode();
 			tft.setLayer(L1);
 			tft.bmpDraw_8bit("1:board_8bit.bmp", 0, 0);
 			//tft.bmpDraw("1:board.bmp", 0, 0);
 
 			tft.setLayer(L2);
-			for(int i = 0; i < 10; i++)
-			{
-				for(int j = 0; j < 10; j++)
-				{
-					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_WHITE);
-					tft.fillCircle(68 + (i*74), 437 - (j*44), 19, RA8875_WHITE);
-					tft.layerEffect(OR);
-					delay_ms(100);
-					tft.clearMemory();
-					delay_ms(100);
-				}
-				tft.clearMemory();
-			}
+//			for(int i = 0; i < 10; i++)
+//			{
+//				for(int j = 0; j < 10; j++)
+//				{
+//					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_WHITE);
+//					tft.fillCircle(68 + (i*74), 437 - (j*44), 19, RA8875_WHITE);
+//					tft.layerEffect(OR);
+//					delay_ms(100);
+//					tft.clearMemory();
+//					delay_ms(100);
+//				}
+//				tft.clearMemory();
+//			}
         }
 
         bool run(void *p) //It is required
         {
-			//draw_shape();
-        	display_image();
+          int roll=0;
+          bool gameOver=false;
+          if(!gameOver)
+          {
+            if(SW.getSwitch(1)&&(button1!=1))
+            {
+            	button1=1;
 
-			while(1);
+            }
+
+            if(SW.getSwitch(2)&&(button2!=1))
+            {
+            	button2=1;
+            }
+            if(button1==1 && button1!=10)
+            {
+            	puts("\nSwitched 1");
+            	roll=rollDice(1);
+            	gameOver=getNextLocation(roll,1);
+
+            }
+            if(button2==1 && button2!=10)
+            {
+            	puts("\nSwitched 1");
+				roll=rollDice(2);
+				gameOver=getNextLocation(roll,2);
+            }
+          }
+//           int i=0;
+//           printf("\n Enter Player:");
+//           scanf("%d",&i);
+//           rollDice(i);
 			return true;
         }
 };

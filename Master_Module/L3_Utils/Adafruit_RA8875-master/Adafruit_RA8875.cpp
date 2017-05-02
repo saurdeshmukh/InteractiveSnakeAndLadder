@@ -28,6 +28,7 @@
 #include "ssp1.h"
 #include "utilities.h"
 #include "Adafruit_RA8875.h"
+#include "out_rgb.h"
 
 #if defined (ARDUINO_ARCH_ARC32)
   uint32_t spi_speed = 12000000;
@@ -44,9 +45,9 @@ enum mode
 void digitalWrite(enum mode m)
 {
 	if(m == LOW)
-		LPC_GPIO2->FIOCLR = (1 << 3);
+		LPC_GPIO0->FIOCLR = (1 << 26);
 	else
-		LPC_GPIO2->FIOSET = (1 << 3);
+		LPC_GPIO0->FIOSET = (1 << 26);
 }
 
 // If the SPI library has transaction support, these functions
@@ -116,11 +117,12 @@ bool Adafruit_RA8875::begin(enum RA8875sizes s) {
   //digitalWrite(_rst, HIGH);
   //delay_ms(100);
 
-
-  //P2.3 = CS
+  //P0.26 = CS
   //P2.4 = RST
-  LPC_PINCON->PINSEL4 &= ~(15 << 6); // Select type as GPIO
-  LPC_GPIO2->FIODIR |= (1<<3);  // Configure P2.3 as output
+  LPC_PINCON->PINSEL1 &= ~(3 << 20); // Select type as GPIO P0.26
+  LPC_PINCON->PINSEL4 &= ~(3 << 8); // Select type as GPIO P2.4
+
+  LPC_GPIO0->FIODIR |= (1<<26);  // Configure P0.26 as output
   LPC_GPIO2->FIODIR |= (1<<4);  // Configure P2.4 as output
 
   digitalWrite(HIGH);				// Set P2.3
@@ -1711,6 +1713,95 @@ void Adafruit_RA8875::bmpDraw(char *filename, int x, int y)
 		u0_dbg_printf("BMP format not recognized.\n");
 
 	f_close(&file);
+}
+
+
+void Adafruit_RA8875::bmpDrawFromHeader(char *filename, int x, int y)
+{
+	uint32_t  	bmpWidth, bmpHeight;   // W+H in pixels
+	uint16_t  	bmpDepth;              // Bit depth (currently must be 24)
+	uint32_t 	bmpImageoffset;        // Start of image data in file
+	uint32_t 	rowSize;               // Not always = bmpWidth; may have padding
+	uint8_t  	sdbuffer[3*BUFFPIXEL]; // pixel in buffer (R+G+B per pixel)
+	uint16_t 	lcdbuffer[BUFFPIXEL];  // pixel out buffer (16-bit per pixel)
+	uint8_t  	buffidx = sizeof(sdbuffer); // Current position in sdbuffer
+	bool  		goodBmp = false;       // Set to true on valid header parse
+	bool  		flip    = true;        // BMP is stored bottom-to-top
+	int      	w, h, row, col;
+	uint8_t  	r, g, b;
+	uint32_t 	pos = 0;
+	uint8_t  	lcdidx = 0;
+	bool  		first 	= true;
+	w = 800;
+	h = 480;
+
+	if((x >= w) || (y >= 480)) return;
+
+	uint16_t data = 0;
+	uint32_t offset = 0;
+	{
+		{
+
+			{
+				// Set TFT address window to clipped image bounds
+				for (row=0; row<h; row++)
+				{
+					// For each scanline...
+					// Seek to start of scan line.  It might seem labor-
+					// intensive to be doing this on every line, but this
+					// method covers a lot of gritty details like cropping
+					// and scanline padding.  Also, the seek only takes
+					// place if the file position actually needs to change
+					// (avoids a lot of cluster math in SD library).
+					if(flip) // Bitmap is stored bottom-to-top order (normal BMP)
+						pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+					else     // Bitmap is stored top-to-bottom
+						pos = bmpImageoffset + row * rowSize;
+					if(offset != pos)
+					{
+						// Need seek?
+						offset = pos;
+						buffidx = sizeof(sdbuffer); // Force buffer reload
+					}
+
+					for (col=0; col<w; col++)
+					{
+						// For each column...
+						// Time to read more pixel data?
+						if (buffidx >= sizeof(sdbuffer))
+						{
+							// Indeed
+							// Push LCD buffer to the display first
+							if(lcdidx > 0)
+							{
+								drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+								lcdidx = 0;
+								first  = false;
+							}
+//							read_wrapper(file,  sdbuffer, sizeof(sdbuffer), offset);
+							memcpy(sdbuffer, MagickImage + offset, sizeof(sdbuffer));
+							offset += sizeof(sdbuffer);
+							buffidx = 0; // Set index to beginning
+						}
+						// Convert pixel from BMP to TFT format
+						b = sdbuffer[buffidx++];
+						g = sdbuffer[buffidx++];
+						r = sdbuffer[buffidx++];
+						lcdbuffer[lcdidx] = color565(r,g,b);
+						drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+					} // end pixel
+
+				} // end scanline
+
+				// Write any remaining data to LCD
+				if(lcdidx > 0)
+				{
+					drawPixel(col+x, row+y, lcdbuffer[lcdidx]);
+				}
+
+			} // end goodBmp
+		}
+	}
 }
 
 

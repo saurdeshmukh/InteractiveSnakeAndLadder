@@ -161,6 +161,7 @@ class Adafruit_RA8875 : public Adafruit_GFX {
   void 		layerEffect(enum RA8875bool efx);//LAYER1, LAYER2, TRANSPARENT, LIGHTEN, OR, AND, FLOATING
   void 		layerTransparency(uint8_t layer1,uint8_t layer2);
   uint8_t 	getCurrentLayer(void); //return the current drawing layer. If layers are OFF, return 255
+  void 		bmpDrawFromHeader(char *filename, int x, int y);
 
  private:
   void PLLinit(void);

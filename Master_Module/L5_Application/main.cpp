@@ -233,7 +233,7 @@ class switch_press_task : public scheduler_task
 
         bool init(void) //Optional
         {
-        	eint3_enable_port2(5, eint_rising_edge, callback_func);
+        	eint3_enable_port2(2, eint_rising_edge, callback_func);
         	debounceTimer.reset(50);
             return true;
         }
@@ -340,6 +340,7 @@ class LCD_task : public scheduler_task
 			tft.setLayer(L1);
 			tft.bmpDraw_8bit("1:board_8bit.bmp", 0, 0);
 			//tft.bmpDraw("1:board.bmp", 0, 0);
+			//tft.bmpDrawFromHeader("1:board.bmp", 0 , 0);
 
 			tft.setLayer(L2);
 //			for(int i = 0; i < 10; i++)

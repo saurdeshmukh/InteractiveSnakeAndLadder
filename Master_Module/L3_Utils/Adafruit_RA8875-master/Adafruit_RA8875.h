@@ -208,6 +208,7 @@ class Adafruit_RA8875 : public Adafruit_GFX {
 #define RA8875_MAGENTA          0xF81F
 #define RA8875_YELLOW           0xFFE0  
 #define RA8875_WHITE            0xFFFF
+#define RA8875_MYCOLOR          0xFFFE
 
 // Command/Data pins for SPI
 #define RA8875_DATAWRITE        0x00

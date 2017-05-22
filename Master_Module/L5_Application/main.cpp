@@ -37,12 +37,13 @@
 #include "io.hpp"
 #include<stdlib.h>
 #include<time.h>
-#define CountSnakeLadder 14
+#include<wireless.h>
+#include<iostream>
+#include<str.hpp>
+#define CountSnakeLadder 12
+#define max_hops 2
+using namespace std;
 
-bool gameOver=false;
-
-SoftTimer debounceTimer;
-SemaphoreHandle_t gButtonPressSemaphore = NULL;
 Adafruit_RA8875 tft(3,4);
 time_t t;
 typedef struct
@@ -53,344 +54,399 @@ typedef struct
 	int Y;
 }Cell;
 Cell Game[100]={0};
-uint8_t button1=0;
-uint8_t button2=0;
-uint8_t SnakeLadderMatrix[CountSnakeLadder][2]={{3,21},{8,30},{17,13},{28,84},{52,29},{57,40},{58,77},{62,22},{75,86},{80,100},{88,18},{90,91},{95,51},{97,79}};
-Cell playerA={0,0,0,0};
-Cell playerB={0,0,0,0};
-void makeGame()
+uint8_t SnakeLadderMatrix[CountSnakeLadder][2]={{3,39},{10,12},{16,13},{27,53},{31,4},{47,25},{56,84},{61,99},{63,60},{66,52},{72,90},{97,75}};
+typedef struct
 {
-	uint8_t count=1;
-	for(int j=0;j<10;j++)
-	{
-		if(j%2)
-		{
-          for(int i=9;i>=0;i--)
-          {
-        	  Game[count-1].Number=count;
-        	  Game[count-1].X=68+(i*74);
-        	  Game[count-1].Y=437-(j*44);
-        	  for(int k=0;k<CountSnakeLadder;k++)
-        	  {
-        		  if(SnakeLadderMatrix[k][0]==count)
-        			  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
-        	  }
-        	  count++;
-          }
-
-		}
-		else
-		{
-		  for(int i=0;i<10;i++)
-		  {
-			  Game[count-1].Number=count;
-			  Game[count-1].X=68+(i*74);
-			  Game[count-1].Y=437-(j*44);
-			  for(int k=0;k<CountSnakeLadder;k++)
-			  {
-				  if(SnakeLadderMatrix[k][0]==count)
-					  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
-			  }
-			  count++;
-		  }
-		}
-	}
-
-}
-void drawCircle(int drawA,int drawB)
+ uint8_t count;
+ uint8_t address;
+}player_list;
+static Uart3 &u3 = Uart3::getInstance();
+typedef enum
 {
-	int i,j;
-	//clear memory
-	tft.clearMemory();
-	delay_ms(100);
-	//drawing circle
-		i=Game[drawA].X;
-	    j=Game[drawA].Y;
-	    printf("\nPlayer A X-%d Y-%d",i,j);
-	tft.drawCircle(i,j, 20, RA8875_BLUE);
-    tft.fillCircle(i,j, 19, RA8875_BLUE);
-    tft.layerEffect(OR);
-    delay_ms(100);
-        i=Game[drawB].X;
-    	j=Game[drawB].Y;
-    	printf("\nPlayer B X-%d Y-%d",i,j);
-    tft.drawCircle(i,j, 20, RA8875_WHITE);
-    tft.fillCircle(i,j, 19, RA8875_WHITE);
-    tft.layerEffect(OR);
-    delay_ms(100);
-
-
-	button1=0;
-	button2=0;
-
-}
-bool getNextLocation(int diceRollOut,int playerId)
-{
-	uint8_t location=0;
-	int oldA=0,oldB=0;
-
-  if(playerId==1 && gameOver==false)
-  {
-	  location=playerA.Number+diceRollOut;
-	  oldA=playerA.Number-1;
-	  if(location>100)
-		  return false;
-	  else if(location == 100 || playerA.Number ==100)
-	  {
-		   printf("\nPlayer 1 Winnnnnerrr");
-		   playerA.Number=location;
-		   button1=10;
-		   gameOver=true;
-	  }
-	  else
-	  {
-	  if(Game[location-1].nextLocation!=0)
-		  playerA.Number=Game[location-1].nextLocation;
-	  else
-		  playerA.Number=location;
-	  }
-	  for(int m=oldA;m<location;m++)
-	  {
-		  drawCircle(m,(playerB.Number-1));
-		  delay_ms(100);
-	  }
-
-  }
-
-  if(playerId==2 && gameOver==false)
-   {
- 	  location=playerB.Number+diceRollOut;
- 	  oldB=playerB.Number-1;
- 	  if(location>100)
- 		  return false;
- 	  else if(location==100 || playerB.Number ==100)
-	  {
-	  printf("\nPlayer 2 Winnnneerrrr");
-	  playerB.Number=location;
-	  button2=10;
-	  gameOver=true;
-	  }
- 	 else
- 	  {
-	  if(Game[location-1].nextLocation!=0)
-		  playerB.Number=Game[location-1].nextLocation;
-	  else
-		  playerB.Number=location;
- 	  }
- 	 for(int m=oldB;m<location;m++)
-	  {
-		  drawCircle((playerA.Number-1),m);
-		  delay_ms(100);
-	  }
-   }
-  printf("\n location X - %d location Y - %d",playerA.Number,playerB.Number);
-  if(gameOver)
-  {
-		tft.fillScreen(RA8875_BLACK);
-		tft.textMode();
-	  /* Render some text! */
-	  tft.textColor(RA8875_BLUE,RA8875_WHITE);
-	  tft.textSetCursor(100, 150);
-	  tft.textEnlarge(3);
-	  tft.textWrite("Player 2 Won!!!!");
-	  tft.layerEffect(OR);
-  }
-  else
-  {
-	  drawCircle((playerA.Number-1),(playerB.Number-1));
-  }
-  return gameOver;
-}
-
-int rollDice(int playerId)
-{
-	uint8_t diceRollout=(rand()%6)+1;
-	LD.setNumber(diceRollout);
-	printf("\n Player Played-%d RolledOut- %d",playerId,diceRollout);
-	return diceRollout;
-	//getNextLocation(diceRollout,playerId);
-}
-void callback_func(void)
-{
-	long yield = 0;
-    if (debounceTimer.expired())
-    {
-    	xSemaphoreGiveFromISR(gButtonPressSemaphore, &yield);
-    	portYIELD_FROM_ISR(yield);
-    	debounceTimer.reset(50);
-
-    }
-}
-
-
-class switch_press_task : public scheduler_task
+	enRoll,
+	gameRunning,
+	gameOver
+}State_t;
+class Master_Task : public scheduler_task
 {
     public:
-        switch_press_task(uint8_t priority) : scheduler_task("task", 2001, priority)
+	Master_Task(uint8_t priority) : scheduler_task("Master", 2048, priority)
         {
-            /* Nothing to init */
-        }
-
-        bool init(void) //Optional
-        {
-        	eint3_enable_port2(2, eint_rising_edge, callback_func);
-        	debounceTimer.reset(50);
-            return true;
-        }
-
-        bool run(void *p) //It is required
-        {
-        	while(1)
-        	{
-        		if(xSemaphoreTake(gButtonPressSemaphore, portMAX_DELAY))
-        		{
-        			u0_dbg_printf("Callback for P2.4 invoked\n");
-        		}
-        	}
-            return true;
-        }
-};
-
-
-class LCD_task : public scheduler_task
-{
-    public:
-        LCD_task(uint8_t priority) : scheduler_task("task", 8000, priority)
-        {
-            /* Nothing to init */
+			current_State=enRoll;
+			playerCount=0;
+			winnerPlayerId=0;
         }
 
         bool init(void)
         {
-        	//draw_shape();
-        	makeGame();
-        	display_image();
-        	srand((unsigned) time(&t));
-        	return true;
-        }
-
-        void draw_shape()
-        {
-
-			if(!tft.init_display(RA8875_800x480, RA8875_PWM_CLK_DIV1024))
-			{
-				printf("RA8875 Not Found!\n");
-				while(1);
-			}
-
-			// With hardware accelleration this is instant
-			tft.fillScreen(RA8875_WHITE);
-
-			// Play with PWM
-			for (uint8_t i=255; i!=0; i-=5 )
-			{
-				tft.PWM1out(i);
-				delay_ms(10);
-			}
-			for (uint8_t i=0; i!=255; i+=5 )
-			{
-				tft.PWM1out(i);
-				delay_ms(10);
-			}
-			tft.PWM1out(255);
-
-			tft.fillScreen(RA8875_RED);
-			delay_ms(500);
-			tft.fillScreen(RA8875_YELLOW);
-			delay_ms(500);
-			tft.fillScreen(RA8875_GREEN);
-			delay_ms(500);
-			tft.fillScreen(RA8875_CYAN);
-			delay_ms(500);
-			tft.fillScreen(RA8875_MAGENTA);
-			delay_ms(500);
-			tft.fillScreen(RA8875_BLACK);
-
-			// Try some GFX acceleration!
-			tft.drawCircle(100, 100, 50, RA8875_BLACK);
-			tft.fillCircle(100, 100, 49, RA8875_GREEN);
-
-			tft.fillRect(11, 11, 398, 198, RA8875_BLUE);
-			tft.drawRect(10, 10, 400, 200, RA8875_GREEN);
-			tft.fillRoundRect(200, 10, 200, 100, 10, RA8875_RED);
-			tft.drawPixel(10,10,RA8875_BLACK);
-			tft.drawPixel(11,11,RA8875_BLACK);
-			tft.drawLine(10, 10, 200, 100, RA8875_RED);
-			tft.drawTriangle(200, 15, 250, 100, 150, 125, RA8875_BLACK);
-			tft.fillTriangle(200, 16, 249, 99, 151, 124, RA8875_YELLOW);
-			tft.drawEllipse(300, 100, 100, 40, RA8875_BLACK);
-			tft.fillEllipse(300, 100, 98, 38, RA8875_GREEN);
-			// Argument 5 (curvePart) is a 2-bit value to control each corner (select 0, 1, 2, or 3)
-			tft.drawCurve(50, 100, 80, 40, 2, RA8875_BLACK);
-			tft.fillCurve(50, 100, 78, 38, 2, RA8875_WHITE);
-
-        }
-
-
-        void display_image()
-        {
-        	Adafruit_RA8875 tft(3,4);
-			if(!tft.init_display(RA8875_800x480, RA8875_PWM_CLK_DIV1024))
-			{
-				printf("RA8875 Not Found!\n");
-				while(1);
-			}
-			tft.fillScreen(RA8875_RED);
-			tft.graphicsMode();
-			tft.setLayer(L1);
-			tft.bmpDraw_8bit("1:board_8bit.bmp", 0, 0);
-			//tft.bmpDraw("1:board.bmp", 0, 0);
-			//tft.bmpDrawFromHeader("1:board.bmp", 0 , 0);
-
-			tft.setLayer(L2);
-//			for(int i = 0; i < 10; i++)
-//			{
-//				for(int j = 0; j < 10; j++)
-//				{
-//					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_WHITE);
-//					tft.fillCircle(68 + (i*74), 437 - (j*44), 19, RA8875_WHITE);
-//					tft.layerEffect(OR);
-//					delay_ms(100);
-//					tft.clearMemory();
-//					delay_ms(100);
-//				}
-//				tft.clearMemory();
-//			}
-        }
-
-        bool run(void *p) //It is required
-        {
-          int roll=0;
-          bool gameOver=false;
-          if(!gameOver)
-          {
-            if(SW.getSwitch(1)&&(button1!=1))
-            {
-            	button1=1;
-
-            }
-
-            if(SW.getSwitch(2)&&(button2!=1))
-            {
-            	button2=1;
-            }
-            if(button1==1 && button1!=10)
-            {
-            	puts("\nSwitched 1");
-            	roll=rollDice(1);
-            	gameOver=getNextLocation(roll,1);
-
-            }
-            if(button2==1 && button2!=10)
-            {
-            	puts("\nSwitched 1");
-				roll=rollDice(2);
-				gameOver=getNextLocation(roll,2);
-            }
-          }
+			u3.init(9600);
+			makeGame();
+			display_image();
+			srand((unsigned) time(&t));
+			audioAlert("N2");
 			return true;
         }
+        void makeGame()
+        {
+        	uint8_t count=1;
+        	for(int j=0;j<10;j++)
+        	{
+        		if(j%2)
+        		{
+                  for(int i=9;i>=0;i--)
+                  {
+                	  Game[count-1].Number=count;
+                	  Game[count-1].X=68+(i*74);
+                	  Game[count-1].Y=437-(j*44);
+                	  for(int k=0;k<CountSnakeLadder;k++)
+                	  {
+                		  if(SnakeLadderMatrix[k][0]==count)
+                			  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
+                	  }
+                	  count++;
+                  }
+
+        		}
+        		else
+        		{
+        		  for(int i=0;i<10;i++)
+        		  {
+        			  Game[count-1].Number=count;
+        			  Game[count-1].X=68+(i*74);
+        			  Game[count-1].Y=437-(j*44);
+        			  for(int k=0;k<CountSnakeLadder;k++)
+        			  {
+        				  if(SnakeLadderMatrix[k][0]==count)
+        					  Game[count-1].nextLocation=SnakeLadderMatrix[k][1];
+        			  }
+        			  count++;
+        		  }
+        		}
+        	}
+
+        }
+
+        void display_image()
+		{
+		//Adafruit_RA8875 tft(3,4);
+		if(!tft.init_display(RA8875_800x480, RA8875_PWM_CLK_DIV1024))
+		{
+			printf("RA8875 Not Found!\n");
+			while(1);
+		}
+		tft.fillScreen(RA8875_RED);
+		tft.graphicsMode();
+		tft.useLayers(true);
+		tft.setLayer(L1);
+		tft.bmpDraw_8bit("1:New_1.bmp", 0, 0);
+		//tft.bmpDraw_8bit("1:board_8bit.bmp", 0, 0);
+		//tft.bmpDraw("1:board.bmp", 0, 0);
+		//tft.bmpDrawFromHeader("1:board.bmp", 0 , 0);
+
+		tft.setLayer(L2);
+		//			for(int i = 0; i < 10; i++)
+		//			{
+		//				for(int j = 0; j < 10; j++)
+		//				{
+		//					tft.drawCircle(68 + (i*74), 437 - (j*44), 20, RA8875_WHITE);
+		//					tft.fillCircle(68 + (i*74), 437 - (j*44), 19, RA8875_WHITE);
+		//					tft.layerEffect(OR);
+		//					delay_ms(100);
+		//					tft.clearMemory();
+		//					delay_ms(100);
+		//				}
+		//				tft.clearMemory();
+		//			}
+		}
+        void audioAlert(const char* message)
+        {
+        	u3.putline(message);
+        }
+        void showTextMessage(const char* message)
+        {
+			//tft.fillScreen(RA8875_BLACK);
+			tft.textMode();
+			tft.textColor(RA8875_BLUE,RA8875_RED);
+			//tft.textColor(RA8875_BLUE,RA8875_WHITE);
+			tft.textSetCursor(100, 150);
+			tft.textEnlarge(3);
+			tft.textWrite(message);
+			tft.layerEffect(LAYER2);
+			vTaskDelay(2000);
+		}
+
+        void pingAll()
+        {
+        	mesh_packet_t ackPkt;
+        	//TODO Max Hops are 100 Now
+			for(uint8_t i=101;i<=102;i++)
+			{
+			 if(wireless_send(i,mesh_pkt_ack,"enroll",strlen("enroll"),max_hops))
+			 {
+				puts("\nSent");
+				if(wireless_get_ack_pkt(&ackPkt,100) && i==ackPkt.nwk.src)
+				{
+					puts("\nReceived ACK");
+				}
+
+			 }
+			 else
+				 puts("\n send failed");
+			}
+        }
+        bool getEnrollment()
+        {
+        	bool outValue=false;
+			mesh_packet_t rcPkt;
+			printf("\n Packet waiting");
+			while(wireless_get_rx_pkt(&rcPkt,8000))
+			{
+				str temp="";
+				for(int i=0;i<rcPkt.info.data_len;i++)
+				{
+					temp+=(char)rcPkt.data[i];
+				}
+				printf("\n Packet Address : %d\n",rcPkt.nwk.src);
+				puts(temp.c_str());
+				 if(temp =="enrollMe")
+				 {
+					 players[playerCount].count=0;
+					 players[playerCount].address=rcPkt.nwk.src;
+					 playerCount++;
+				 }
+			}
+
+			if(playerCount>0)
+				outValue=true;
+			for(int i=0;i<playerCount;i++)
+			{
+				printf("\n players address - %d count- %d Bool value - %d",players[i].address,playerCount,outValue);
+			}
+			return outValue;
+        }
+        bool getNextLocation(uint8_t diceRollOut,uint8_t playerId)
+        {
+        	uint8_t location=0;
+        	uint8_t oldLocation=0;
+        	uint8_t finalLocation=0;
+        	bool returnVal=false;
+        	  location=players[playerId].count+diceRollOut;
+        	  printf("\nPlayerId-%d location - %d current Location-%d ",playerId,location,players[playerId].count);
+        	  oldLocation=players[playerId].count;
+        	  if(location>100)
+        		  return returnVal;
+        	  else if(location == 100)
+        	  {
+        		  players[playerId].count=location;
+        		  returnVal=true;
+        	  }
+        	  else
+        	  {
+        	  if(Game[location-1].nextLocation!=0)
+        	  {
+        		  players[playerId].count=Game[location-1].nextLocation;
+        		  if(Game[location-1].nextLocation > Game[location-1].Number)
+        		  {
+        			  puts("\n LADDDDDER");
+        			  vTaskDelay(2000);
+        			  audioAlert("SYou got Ladder");
+        		  }
+        		  else
+        		  {
+        			  vTaskDelay(2000);
+        			  audioAlert("Sohhhhhhhhh You got Snake");
+        			  puts("\n LADDDDDER");
+        		  }
+        		  printf("\nPlayerId-%d location - %d current Location-%d ",playerId,location,players[playerId].count);
+        	  }
+        	  else
+        		  players[playerId].count=location;
+        	  }
+        	  finalLocation=players[playerId].count;
+        	  printf("\n Final Count-%d",finalLocation);
+        	  for(int m=oldLocation;m<=location;m++)
+        	  {
+        		  players[playerId].count=m;
+        		  drawCircle();
+        		  delay_ms(100);
+        	  }
+        	  players[playerId].count=finalLocation;
+        	  drawCircle();
+          return returnVal;
+        }
+        void drawCircle()
+        {
+        	int i,j;
+        	//clear memory
+
+        	tft.graphicsMode();
+        	tft.clearMemory();
+        	tft.layerEffect(OR);
+        	//tft.setLayer(L2);
+        	for(int k=0;k<playerCount;k++)
+        	{
+				delay_ms(250);
+				//drawing circle
+				i=Game[players[k].count-1].X;
+				j=Game[players[k].count-1].Y;
+				//add colors TODO
+				tft.drawCircle(i,j, 20, RA8875_RED);
+				tft.fillCircle(i,j, 19, RA8875_WHITE);
+        	}
+			//tft.layerEffect(OR);
+        }
+        void sendDataToPlayers(str message,uint8_t addr)
+        {
+        	mesh_packet_t ackPkt;
+        	char buffer[100];
+        	strcpy(buffer,message.c_str());
+        	if(addr==0)
+        	{
+				for(int i=0;i<playerCount;i++)
+				{
+					if(wireless_send(players[i].address,mesh_pkt_ack,(char*)buffer,strlen(buffer),max_hops))
+						puts("\nSent Stop");
+				}
+        	}
+        	else
+        	{
+        		puts("\nSending GO");
+        		bool ackFlag=false;
+        		while(!ackFlag)
+        		{
+        			wireless_send(addr,mesh_pkt_ack,buffer,strlen(buffer),max_hops);
+        			puts(message.c_str());
+        			if(wireless_get_ack_pkt(&ackPkt,100) && addr==ackPkt.nwk.src)
+					{
+        				ackFlag=true;
+						puts("\nReceived ACK");
+					}
+
+        		}
+        	}
+        }
+        bool buttonPressed(uint8_t address)
+        {
+			mesh_packet_t rcPkt;
+			puts("\nwaiting for button pressed");
+			while(wireless_get_rx_pkt(&rcPkt,portMAX_DELAY))
+			{
+				str temp="";
+				for(int i=0;i<rcPkt.info.data_len;i++)
+				{
+					temp+=(char)rcPkt.data[i];
+				}
+				puts(temp.c_str());
+			 if(temp=="pushed" && rcPkt.nwk.src==address)
+			 {
+				 puts("\nButton Pressed by Player");
+				 return true;
+			 }
+
+			}
+			return false;
+        }
+        int rollDice()
+        {
+        	uint8_t diceRollout=(rand()%6)+1;
+        	LD.setNumber(diceRollout);
+        	return diceRollout;
+        }
+        bool run(void *p)
+        {
+        	uint8_t RollOut=0;
+        	switch(current_State)
+        	{
+        	case enRoll:
+        		tft.clearMemory();
+        		vTaskDelay(2000);
+        		//TODO Add Counting on Screen
+				audioAlert("SEnroll for Game Guys");
+				showTextMessage("Enroll For Game Now ");
+				pingAll();
+				while(!getEnrollment())
+				{
+					pingAll();
+				}
+				//tft.layerEffect(LAYER1);
+				//tft.setLayer(L2);
+				//tft.clearMemory();
+				sendDataToPlayers("stop",0);
+				//TODO Select First player Randomly and use Circular Queue
+				current_State=gameRunning;
+				break;
+        	case gameRunning:
+                 puts("\nReached in gameRunning State");
+        		for(int i=0;i<playerCount;i++)
+        		{
+        			static int k=0;
+        			audioAlert("SPress Button and Roll Dice");
+        			vTaskDelay(2000);
+        			sendDataToPlayers("go",players[i].address);
+					if(buttonPressed(players[i].address))
+					{
+					 RollOut=rollDice();
+					}
+					printf("\n Rolled Out - %d %d",RollOut,playerCount);
+					str temp1="dice";
+					temp1+=(char)('0'+RollOut);  //check if working
+					//TODO change Audio Message for Dice
+					str temp2="Syou got";
+					temp2+=(char)('0'+RollOut);
+					audioAlert(temp2.c_str());
+					puts("\n Sending Dice Rolled Out");
+					puts(temp1.c_str());
+					sendDataToPlayers(temp1,players[i].address);
+					if(getNextLocation(RollOut,i))
+					{
+						puts("\n GameOver State");
+						current_State=gameOver;
+						winnerPlayerId=++i;
+						break;
+					}
+					drawCircle();
+                    vTaskDelay(2000);
+        		}
+        		break;
+        	case gameOver:
+        	{
+        		tft.clearMemory();
+        		vTaskDelay(2000);
+        		str temp2="Player ";
+        		temp2+=(char)('0'+winnerPlayerId);
+        		temp2+=" is Winner";
+        		puts(temp2.c_str());
+        		showTextMessage(temp2.c_str());
+        		temp2="S"+temp2;
+        		audioAlert(temp2.c_str());
+        		puts(temp2.c_str());
+        		vTaskDelay(5000);
+        		sendDataToPlayers("stop",0);
+
+        		for(int i=0;i<playerCount;i++)
+        		{
+        			players[i].count=0;
+        			players[i].address=0;
+        		}
+        		playerCount=0;
+        		winnerPlayerId=0;
+
+            	current_State=enRoll;
+        	}
+        		break;
+        	default:
+        		break;
+        	}
+        	return true;
+        }
+    private:
+        State_t current_State;
+        uint8_t playerCount;
+        player_list players[100];
+        uint8_t winnerPlayerId;
 };
+
+
 
 
 
@@ -412,6 +468,7 @@ int main(void)
 {
     /**
      * A few basic tasks for this bare-bone system :
+
      *      1.  Terminal task provides gateway to interact with the board through UART terminal.
      *      2.  Remote task allows you to use remote control to interact with the board.
      *      3.  Wireless task responsible to receive, retry, and handle mesh network.
@@ -420,15 +477,13 @@ int main(void)
      * such that it can save remote control codes to non-volatile memory.  IR remote
      * control codes can be learned by typing the "learn" terminal command.
      */
-	scheduler_add_task(new terminalTask(PRIORITY_HIGH));
+	/* Consumes very little CPU, but need highest priority to handle mesh network ACKs */
+	   scheduler_add_task(new wirelessTask(PRIORITY_CRITICAL));
+	//scheduler_add_task(new terminalTask(PRIORITY_HIGH));
+   scheduler_add_task(new Master_Task(PRIORITY_HIGH));
 
-	gButtonPressSemaphore = xSemaphoreCreateBinary();
-    scheduler_add_task(new LCD_task(PRIORITY_HIGH));
-    scheduler_add_task(new switch_press_task(PRIORITY_HIGH));
 
 
-    /* Consumes very little CPU, but need highest priority to handle mesh network ACKs */
-    //scheduler_add_task(new wirelessTask(PRIORITY_CRITICAL));
 
     /* Change "#if 0" to "#if 1" to run period tasks; @see period_callbacks.cpp */
     #if 0

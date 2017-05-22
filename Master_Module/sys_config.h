@@ -37,7 +37,7 @@ extern "C" {
  *
  * @warning Go to   "PROJECT" --> "Clean"   if you change the settings here.
  */
-#define WIRELESS_NODE_ADDR              106    ///< Any value from 1-254
+#define WIRELESS_NODE_ADDR              100   ///< Any value from 1-254
 #define WIRELESS_CHANNEL_NUM            2499   ///< 2402 - 2500 to avoid collisions among 2+ mesh networks
 #define WIRELESS_AIR_DATARATE_KBPS      2000   ///< Air data rate, can only be 250, 1000, or 2000 kbps
 #define WIRELESS_NODE_NAME             "node"  ///< Wireless node name (ping response contains this name)

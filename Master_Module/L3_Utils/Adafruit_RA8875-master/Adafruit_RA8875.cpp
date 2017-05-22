@@ -381,17 +381,20 @@ void Adafruit_RA8875::textColor(uint16_t foreColor, uint16_t bgColor)
   writeData((foreColor & 0x001f));
   
   /* Set Background Color */
-  writeCommand(0x60);
+
+  /*writeCommand(0x60);
   writeData((bgColor & 0xf800) >> 11);
   writeCommand(0x61);
   writeData((bgColor & 0x07e0) >> 5);
   writeCommand(0x62);
-  writeData((bgColor & 0x001f));
+  writeData((bgColor & 0x001f));*/
   
+
   /* Clear transparency flag */
   writeCommand(0x22);
   uint8_t temp = readData();
   temp &= ~(1<<6); // Clear bit 6
+  //temp |= (1<<6); // Set bit 6
   writeData(temp);
 }
 

@@ -191,12 +191,14 @@ class remote_wireless: public scheduler_task
 
         	mesh_packet_t rcvPkt, ackPkt;
         	gConsole_message_t messageToSend, messageReceived;
-        	int timeout_ms = 10;
+        	int timeout_ms = 900;
         	bool rx = false;
         	str messageString = "";
 
         	//printf("wireless \n");
         	// Wait for the game Master has send any message
+        	//
+
         	while (wireless_get_rx_pkt(&rcvPkt, timeout_ms)) {
         		printf("Received data from %i\n", rcvPkt.nwk.src);
 				for (int i = 0; i < rcvPkt.info.data_len; i++) {
@@ -250,6 +252,7 @@ class remote_wireless: public scheduler_task
 							if(wireless_get_ack_pkt(&ackPkt, 100) && CONSOL_ADDRESS == ackPkt.nwk.src){
 								printf(" Received ACK \n");
 							}
+							wireless_flush_rx();
 						}
 						else{
 							printf(" Something wrong - Packet not send !!! \n");
@@ -262,6 +265,7 @@ class remote_wireless: public scheduler_task
 							if(wireless_get_ack_pkt(&ackPkt, 100) && CONSOL_ADDRESS == ackPkt.nwk.src){
 								printf(" Received ACK \n");
 							}
+							wireless_flush_rx();
 						}
 						else{
 							printf(" Something wrong - Packet not send !!! \n");

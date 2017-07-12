@@ -179,11 +179,11 @@ class Master_Task : public scheduler_task
         {
         	mesh_packet_t ackPkt;
         	//TODO Max Hops are 100 Now
-			for(uint8_t i=101;i<=102;i++)
+			for(uint8_t i=101;i<=120;i++)
 			{
 			 if(wireless_send(i,mesh_pkt_ack,"enroll",strlen("enroll"),max_hops))
 			 {
-				puts("\nSent");
+
 				if(wireless_get_ack_pkt(&ackPkt,100) && i==ackPkt.nwk.src)
 				{
 					puts("\nReceived ACK");
@@ -248,12 +248,12 @@ class Master_Task : public scheduler_task
         		  if(Game[location-1].nextLocation > Game[location-1].Number)
         		  {
         			  puts("\n LADDDDDER");
-        			  vTaskDelay(2000);
+        			  vTaskDelay(1500);
         			  audioAlert("SYou got Ladder");
         		  }
         		  else
         		  {
-        			  vTaskDelay(2000);
+        			  vTaskDelay(1500);
         			  audioAlert("Sohhhhhhhhh You got Snake");
         			  puts("\n LADDDDDER");
         		  }
@@ -359,10 +359,10 @@ class Master_Task : public scheduler_task
         	{
         	case enRoll:
         		tft.clearMemory();
-        		vTaskDelay(2000);
+        		vTaskDelay(1500);
         		//TODO Add Counting on Screen
-				audioAlert("SEnroll for Game Guys");
-				showTextMessage("Enroll For Game Now ");
+				audioAlert("SPlayers can Enroll Now");
+				showTextMessage("Players can Enroll");
 				pingAll();
 				while(!getEnrollment())
 				{
@@ -372,16 +372,17 @@ class Master_Task : public scheduler_task
 				//tft.setLayer(L2);
 				//tft.clearMemory();
 				sendDataToPlayers("stop",0);
-				//TODO Select First player Randomly and use Circular Queue
+				tft.graphicsMode();
+				tft.clearMemory();
+				tft.layerEffect(OR);
 				current_State=gameRunning;
 				break;
         	case gameRunning:
                  puts("\nReached in gameRunning State");
         		for(int i=0;i<playerCount;i++)
         		{
-        			static int k=0;
-        			audioAlert("SPress Button and Roll Dice");
-        			vTaskDelay(2000);
+        			audioAlert("SRoll Dice");
+        			vTaskDelay(1500);
         			sendDataToPlayers("go",players[i].address);
 					if(buttonPressed(players[i].address))
 					{
